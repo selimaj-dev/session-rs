@@ -1,4 +1,6 @@
+pub mod error;
 pub mod handshake;
+pub use error::{Error, Result};
 
 use std::{
     hash::{Hash, Hasher},
@@ -9,7 +11,14 @@ use tokio::{
     sync::Mutex,
 };
 
-use crate::SessionFrame;
+#[derive(Debug, Clone)]
+pub enum Frame {
+    Text(String),
+    Binary(Vec<u8>),
+    Ping,
+    Pong,
+    Close,
+}
 
 pub struct WebSocket {
     pub(crate) reader: Arc<Mutex<tokio::net::tcp::OwnedReadHalf>>,
@@ -44,7 +53,7 @@ impl Hash for WebSocket {
 }
 
 impl WebSocket {
-    async fn send_frame(&self, opcode: u8, payload: &[u8]) -> crate::Result<()> {
+    async fn send_frame(&self, opcode: u8, payload: &[u8]) -> Result<()> {
         let mut writer = self.writer.lock().await;
 
         let mut header = Vec::with_capacity(10);
@@ -86,23 +95,23 @@ impl WebSocket {
 }
 
 impl WebSocket {
-    pub async fn send<T: serde::Serialize>(&self, msg: &T) -> crate::Result<()> {
-        self.send_frame(0x1, &serde_json::to_vec(msg)?).await
+    pub async fn send(&self, msg: &str) -> Result<()> {
+        self.send_frame(0x1, msg.as_bytes()).await
     }
 
-    pub async fn send_bin(&self, payload: &[u8]) -> crate::Result<()> {
+    pub async fn send_bin(&self, payload: &[u8]) -> Result<()> {
         self.send_frame(0x2, payload).await
     }
 
-    pub async fn send_ping(&self) -> crate::Result<()> {
+    pub async fn send_ping(&self) -> Result<()> {
         self.send_frame(0x9, &[]).await
     }
 
-    pub async fn send_pong(&self) -> crate::Result<()> {
+    pub async fn send_pong(&self) -> Result<()> {
         self.send_frame(0xA, &[]).await
     }
 
-    pub async fn close(&self) -> crate::Result<()> {
+    pub async fn close(&self) -> Result<()> {
         self.send_frame(0x8, &[]).await
     }
 
@@ -123,7 +132,7 @@ impl WebSocket {
 impl WebSocket {
     /// Read a full WebSocket frame (handling masking and control frames)
     /// Returns (opcode, payload)
-    pub async fn read_frame(&self) -> crate::Result<(bool, u8, Vec<u8>)> {
+    pub async fn read_frame(&self) -> Result<(bool, u8, Vec<u8>)> {
         let mut reader = self.reader.lock().await;
 
         // --- 1. Read first 2-byte header ---
@@ -150,7 +159,7 @@ impl WebSocket {
         if !masked && !self.mask_payload {
             // Per spec, client-to-server frames MUST be masked
             self.close().await.ok();
-            return Err(crate::Error::InvalidFrame(
+            return Err(Error::InvalidFrame(
                 "Received unmasked frame from client".into(),
             ));
         }
@@ -171,7 +180,7 @@ impl WebSocket {
         Ok((fin, opcode, payload))
     }
 
-    pub async fn read(&self) -> crate::Result<SessionFrame> {
+    pub async fn read(&self) -> Result<Frame> {
         let (fin, opcode, mut payload) = self.read_frame().await?;
 
         if !fin {
@@ -194,9 +203,7 @@ impl WebSocket {
                     0xA => {}
                     _ => {
                         self.close().await.ok();
-                        return Err(crate::Error::InvalidFrame(format!(
-                            "Unknown opcode: {opcode}"
-                        )));
+                        return Err(Error::InvalidFrame(format!("Unknown opcode: {opcode}")));
                     }
                 }
             }
@@ -206,29 +213,27 @@ impl WebSocket {
             // Close
             0x8 => {
                 self.close().await.ok();
-                Ok(SessionFrame::Close)
+                Ok(Frame::Close)
             }
 
             // Ping
             0x9 => {
                 self.send_pong().await.ok();
-                Ok(SessionFrame::Ping)
+                Ok(Frame::Ping)
             }
 
             // Pong
-            0xA => Ok(SessionFrame::Pong),
+            0xA => Ok(Frame::Pong),
 
             // Text
-            0x1 => Ok(SessionFrame::Text(String::from_utf8(payload)?)),
+            0x1 => Ok(Frame::Text(String::from_utf8(payload)?)),
 
             // Binary
-            0x2 => Ok(SessionFrame::Binary(payload)),
+            0x2 => Ok(Frame::Binary(payload)),
 
             _ => {
                 self.close().await.ok();
-                Err(crate::Error::InvalidFrame(format!(
-                    "Unknown opcode: {opcode}"
-                )))
+                Err(Error::InvalidFrame(format!("Unknown opcode: {opcode}")))
             }
         }
     }

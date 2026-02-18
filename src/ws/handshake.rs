@@ -82,7 +82,7 @@ pub async fn handle_websocket_handshake(stream: &mut TcpStream) -> std::io::Resu
 }
 
 impl WebSocket {
-    pub async fn handshake(mut stream: TcpStream) -> crate::Result<Self> {
+    pub async fn handshake(mut stream: TcpStream) -> super::Result<Self> {
         handle_websocket_handshake(&mut stream).await?;
 
         let (read, write) = stream.into_split();
@@ -96,7 +96,7 @@ impl WebSocket {
     }
 
     /// Connect to a WebSocket server and perform the handshake
-    pub async fn connect(addr: &str, path: &str) -> crate::Result<Self> {
+    pub async fn connect(addr: &str, path: &str) -> super::Result<Self> {
         // 1. TCP connect
         let mut stream = TcpStream::connect(addr).await?;
 
@@ -123,7 +123,7 @@ impl WebSocket {
         let mut status_line = String::new();
         reader.read_line(&mut status_line).await?;
         if !status_line.starts_with("HTTP/1.1 101") {
-            return Err(crate::Error::HandshakeFailed(format!(
+            return Err(super::Error::HandshakeFailed(format!(
                 "Expected 101 Switching Protocols, got: {}",
                 status_line.trim_end()
             )));
@@ -153,7 +153,7 @@ impl WebSocket {
             base64::encode(sha1.finalize())
         };
         if sec_accept.as_deref() != Some(expected.as_str()) {
-            return Err(crate::Error::HandshakeFailed(
+            return Err(super::Error::HandshakeFailed(
                 "Sec-WebSocket-Accept mismatch".into(),
             ));
         }
