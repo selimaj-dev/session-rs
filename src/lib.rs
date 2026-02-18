@@ -2,8 +2,8 @@ pub mod handshake;
 pub mod server;
 pub mod session;
 
-pub enum SessionMessage<T> {
-    SessionMessage(T),
+pub enum SessionFrame<T> {
+    Typed(T),
     Binary(Vec<u8>),
 }
 
@@ -12,6 +12,8 @@ pub type Result<T> = std::result::Result<T, Error>;
 pub enum Error {
     Io(std::io::Error),
     Json(serde_json::Error),
+    InvalidFrame(String),
+    ConnectionClosed,
 }
 
 impl From<std::io::Error> for Error {
