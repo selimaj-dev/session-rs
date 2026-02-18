@@ -9,6 +9,7 @@ pub enum SessionFrame<T> {
 
 pub type Result<T> = std::result::Result<T, Error>;
 
+#[derive(Debug)]
 pub enum Error {
     Io(std::io::Error),
     Json(serde_json::Error),
