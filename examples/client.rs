@@ -1,12 +1,10 @@
 use std::sync::Arc;
-use tokio::net::TcpStream;
 
 use session_rs::session::Session;
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> session_rs::Result<()> {
-    let stream = TcpStream::connect("127.0.0.1:8080").await?;
-    let session = Arc::new(Session::new(stream).await?);
+    let session = Arc::new(Session::new_server("127.0.0.1:8080", "/").await?);
 
     // Spawn read loop
     let read_session = Arc::clone(&session);

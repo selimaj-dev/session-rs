@@ -14,6 +14,7 @@ pub enum Error {
     Io(std::io::Error),
     Json(serde_json::Error),
     InvalidFrame(String),
+    HandshakeFailed(String),
     ConnectionClosed,
 }
 

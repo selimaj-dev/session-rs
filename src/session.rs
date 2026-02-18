@@ -9,23 +9,9 @@ use tokio::{
 };
 
 pub struct Session {
-    reader: Arc<Mutex<tokio::net::tcp::OwnedReadHalf>>,
-    writer: Arc<Mutex<tokio::net::tcp::OwnedWriteHalf>>,
-    id: u64,
-}
-
-impl Session {
-    pub async fn new(mut stream: TcpStream) -> crate::Result<Self> {
-        crate::handshake::handle_websocket_handshake(&mut stream).await?;
-
-        let (read, write) = stream.into_split();
-
-        Ok(Self {
-            reader: Arc::new(Mutex::new(read)),
-            writer: Arc::new(Mutex::new(write)),
-            id: rand::random(),
-        })
-    }
+    pub(crate) reader: Arc<Mutex<tokio::net::tcp::OwnedReadHalf>>,
+    pub(crate) writer: Arc<Mutex<tokio::net::tcp::OwnedWriteHalf>>,
+    pub(crate) id: u64,
 }
 
 impl Clone for Session {
