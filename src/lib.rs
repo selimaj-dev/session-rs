@@ -5,6 +5,9 @@ pub mod session;
 pub enum SessionFrame<T> {
     Typed(T),
     Binary(Vec<u8>),
+    Ping,
+    Pong,
+    Close
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

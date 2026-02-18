@@ -7,6 +7,8 @@ use tokio::{
     sync::Mutex,
 };
 
+use crate::SessionFrame;
+
 pub struct Session {
     pub(crate) reader: Arc<Mutex<tokio::net::tcp::OwnedReadHalf>>,
     pub(crate) writer: Arc<Mutex<tokio::net::tcp::OwnedWriteHalf>>,
@@ -119,14 +121,14 @@ impl Session {
 impl Session {
     /// Read a full WebSocket frame (handling masking and control frames)
     /// Returns (opcode, payload)
-    pub async fn read_frame(&self) -> crate::Result<Option<(u8, Vec<u8>)>> {
+    pub async fn read_frame(&self) -> crate::Result<(bool, u8, Vec<u8>)> {
         let mut reader = self.reader.lock().await;
 
         // --- 1. Read first 2-byte header ---
         let mut header = [0u8; 2];
         reader.read_exact(&mut header).await?;
 
-        // let fin = header[0] & 0x80 != 0;
+        let fin = header[0] & 0x80 != 0;
         let opcode = header[0] & 0x0F;
         let masked = header[1] & 0x80 != 0;
         let mut payload_len = (header[1] & 0x7F) as u64;
@@ -163,35 +165,42 @@ impl Session {
             }
         }
 
-        // --- 5. Handle control frames immediately ---
+        // --- 6. Return opcode + payload ---
+        Ok((fin, opcode, payload))
+    }
+
+    pub async fn read<T>(&self) -> crate::Result<SessionFrame<T>> {
+        let (fin, opcode, payload) = self.read_frame().await?;
+
         match opcode {
+            // Close
             0x8 => {
-                // Close
                 self.close().await.ok();
-                return Err(crate::Error::ConnectionClosed);
+                Ok(SessionFrame::Close)
             }
+
+            // Ping
             0x9 => {
-                // Ping
                 self.send_pong().await.ok();
-                return Ok(None);
+                Ok(SessionFrame::Ping)
             }
-            0xA => {
-                // Pong, ignore
-                return Ok(None);
-            }
-            0x0 | 0x1 | 0x2 => {
-                // Continuation / Text / Binary → valid payload
-            }
+
+            // Pong, ignore
+            0xA => Ok(SessionFrame::Pong),
+
+            // Continuation / Text / Binary → valid payload
+            0x0 => Ok(None),
+
+            0x1 => Ok(None),
+
+            0x2 => Ok(None),
+
             _ => {
                 self.close().await.ok();
-                return Err(crate::Error::InvalidFrame(format!(
-                    "Unknown opcode: {}",
-                    opcode
-                )));
+                Err(crate::Error::InvalidFrame(format!(
+                    "Unknown opcode: {opcode}"
+                )))
             }
         }
-
-        // --- 6. Return opcode + payload ---
-        Ok(Some((opcode, payload)))
     }
 }
