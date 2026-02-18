@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use session_rs::ws::WebSocket;
+use session_rs::{SessionFrame, ws::WebSocket};
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> session_rs::Result<()> {
@@ -11,13 +11,10 @@ async fn main() -> session_rs::Result<()> {
     tokio::spawn(async move {
         loop {
             match read_session.read().await {
-                Ok(Some((opcode, payload))) => {
-                    if opcode == 0x1 {
-                        let text = String::from_utf8(payload).unwrap_or_default();
-                        println!("Server says: {}", text);
-                    }
+                Ok(SessionFrame::Text(text)) => {
+                    println!("Server says: {}", text);
                 }
-                Ok(None) => {}
+                Ok(_) => {}
                 Err(_) => break,
             }
         }

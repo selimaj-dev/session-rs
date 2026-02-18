@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use tokio::net::TcpListener;
 
-use session_rs::session::WebSocket;
+use session_rs::{SessionFrame, ws::WebSocket};
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> session_rs::Result<()> {
@@ -26,21 +26,17 @@ async fn main() -> session_rs::Result<()> {
 
             // Read loop
             loop {
-                match session.read_frame().await {
-                    Ok(Some((opcode, payload))) => {
-                        if opcode == 0x1 {
-                            // Text frame → parse JSON if possible
-                            let text = String::from_utf8(payload).unwrap_or_default();
-                            println!("Received text: {}", text);
+                match session.read().await {
+                    Ok(SessionFrame::Text(text)) => {
+                        println!("Received text: {}", text);
 
-                            // Echo back
-                            if let Err(e) = session.send(&serde_json::json!({"echo": text})).await {
-                                eprintln!("Send error: {:?}", e);
-                                break;
-                            }
+                        // Echo back
+                        if let Err(e) = session.send(&serde_json::json!({"echo": text})).await {
+                            eprintln!("Send error: {:?}", e);
+                            break;
                         }
                     }
-                    Ok(None) => {}
+                    Ok(_) => {}
                     Err(e) => {
                         eprintln!("{e:?}");
                         break;

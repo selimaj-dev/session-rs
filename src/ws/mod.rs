@@ -171,8 +171,36 @@ impl WebSocket {
         Ok((fin, opcode, payload))
     }
 
-    pub async fn read<T>(&self) -> crate::Result<SessionFrame<T>> {
-        let (fin, opcode, payload) = self.read_frame().await?;
+    pub async fn read(&self) -> crate::Result<SessionFrame> {
+        let (fin, opcode, mut payload) = self.read_frame().await?;
+
+        if !fin {
+            // Continuation loop
+            while let (fin, o, mut p) = self.read_frame().await?
+                && !fin
+            {
+                match o {
+                    // Continuation
+                    0x0 => payload.append(&mut p),
+                    // Close
+                    0x8 => {
+                        self.close().await.ok();
+                    }
+                    // Ping
+                    0x9 => {
+                        self.send_pong().await.ok();
+                    }
+                    // Pong
+                    0xA => {}
+                    _ => {
+                        self.close().await.ok();
+                        return Err(crate::Error::InvalidFrame(format!(
+                            "Unknown opcode: {opcode}"
+                        )));
+                    }
+                }
+            }
+        }
 
         match opcode {
             // Close
@@ -190,16 +218,11 @@ impl WebSocket {
             // Pong
             0xA => Ok(SessionFrame::Pong),
 
-            // Continuation
-            0x0 => Ok(SessionFrame::Pong),
-
             // Text
-            // 0x1 => {
-
-            // },
+            0x1 => Ok(SessionFrame::Text(String::from_utf8(payload)?)),
 
             // Binary
-            0x2 => Ok(SessionFrame::Pong),
+            0x2 => Ok(SessionFrame::Binary(payload)),
 
             _ => {
                 self.close().await.ok();
