@@ -25,9 +25,10 @@ async fn main() -> session_rs::Result<()> {
 
     // Send a few messages
     for i in 0..5 {
+        println!("sending");
         let msg = serde_json::json!({ "hello": i });
         session.send(&msg).await?;
-        tokio::time::sleep(std::time::Duration::from_secs(1000)).await;
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
     }
 
     session.close().await?;

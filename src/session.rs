@@ -102,12 +102,13 @@ impl Session {
         self.send_frame(0x8, &[]).await
     }
 
-    pub fn start_ping(self: Arc<Self>) {
+    pub fn start_ping_loop(&self) {
+        let s = self.clone();
         tokio::task::spawn(async move {
             let mut interval = tokio::time::interval(std::time::Duration::from_secs(15));
             loop {
                 interval.tick().await;
-                if self.send_ping().await.is_err() {
+                if s.send_ping().await.is_err() {
                     break;
                 }
             }

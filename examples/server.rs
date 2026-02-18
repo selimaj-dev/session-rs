@@ -22,17 +22,7 @@ async fn main() -> session_rs::Result<()> {
                 }
             };
 
-            // Simple ping loop
-            let ping_session = Arc::clone(&session);
-            tokio::spawn(async move {
-                let mut interval = tokio::time::interval(std::time::Duration::from_secs(15));
-                loop {
-                    interval.tick().await;
-                    if ping_session.send_ping().await.is_err() {
-                        break;
-                    }
-                }
-            });
+            session.start_ping_loop();
 
             // Read loop
             loop {
