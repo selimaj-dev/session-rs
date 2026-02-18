@@ -4,7 +4,7 @@ use session_rs::session::Session;
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> session_rs::Result<()> {
-    let session = Arc::new(Session::new_server("127.0.0.1:8080", "/").await?);
+    let session = Arc::new(Session::connect("127.0.0.1:8080", "/").await?);
 
     // Spawn read loop
     let read_session = Arc::clone(&session);
@@ -27,7 +27,7 @@ async fn main() -> session_rs::Result<()> {
     for i in 0..5 {
         let msg = serde_json::json!({ "hello": i });
         session.send(&msg).await?;
-        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        tokio::time::sleep(std::time::Duration::from_secs(1000)).await;
     }
 
     session.close().await?;

@@ -14,7 +14,7 @@ async fn main() -> session_rs::Result<()> {
 
         tokio::spawn(async move {
             // Wrap session in Arc so tasks can share it
-            let session = match Session::new_client(stream).await {
+            let session = match Session::handshake(stream).await {
                 Ok(s) => Arc::new(s),
                 Err(e) => {
                     eprintln!("Handshake failed: {:?}", e);
@@ -51,7 +51,10 @@ async fn main() -> session_rs::Result<()> {
                         }
                     }
                     Ok(None) => {}
-                    Err(_) => break, // connection closed
+                    Err(e) => {
+                        eprintln!("{e:?}");
+                        break;
+                    }
                 }
             }
 

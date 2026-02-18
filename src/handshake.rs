@@ -82,20 +82,21 @@ pub async fn handle_websocket_handshake(stream: &mut TcpStream) -> std::io::Resu
 }
 
 impl Session {
-    pub async fn new_client(mut stream: TcpStream) -> crate::Result<Self> {
+    pub async fn handshake(mut stream: TcpStream) -> crate::Result<Self> {
         crate::handshake::handle_websocket_handshake(&mut stream).await?;
 
         let (read, write) = stream.into_split();
 
         Ok(Self {
+            id: rand::random(),
             reader: Arc::new(Mutex::new(read)),
             writer: Arc::new(Mutex::new(write)),
-            id: rand::random(),
+            mask_payload: false,
         })
     }
 
     /// Connect to a WebSocket server and perform the handshake
-    pub async fn new_server(addr: &str, path: &str) -> crate::Result<Self> {
+    pub async fn connect(addr: &str, path: &str) -> crate::Result<Self> {
         // 1. TCP connect
         let mut stream = TcpStream::connect(addr).await?;
 
@@ -161,9 +162,10 @@ impl Session {
         let (read, write) = stream.into_split();
 
         Ok(Self {
+            id: rand::random(),
             reader: Arc::new(Mutex::new(read)),
             writer: Arc::new(Mutex::new(write)),
-            id: rand::random(),
+            mask_payload: true,
         })
     }
 }

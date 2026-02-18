@@ -4,7 +4,6 @@ use std::{
 };
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
-    net::TcpStream,
     sync::Mutex,
 };
 
@@ -12,6 +11,7 @@ pub struct Session {
     pub(crate) reader: Arc<Mutex<tokio::net::tcp::OwnedReadHalf>>,
     pub(crate) writer: Arc<Mutex<tokio::net::tcp::OwnedWriteHalf>>,
     pub(crate) id: u64,
+    pub(crate) mask_payload: bool,
 }
 
 impl Clone for Session {
@@ -19,6 +19,7 @@ impl Clone for Session {
         Session {
             reader: self.reader.clone(),
             writer: self.writer.clone(),
+            mask_payload: self.mask_payload.clone(),
             id: self.id,
         }
     }
@@ -43,29 +44,46 @@ impl Session {
         let mut writer = self.writer.lock().await;
 
         let mut header = Vec::with_capacity(10);
-        header.push(0x80 | opcode);
+        let mask_bit = if self.mask_payload { 0x80 } else { 0x00 };
+        header.push(0x80 | opcode); // FIN + opcode
 
         let len = payload.len();
         if len < 126 {
-            header.push(len as u8);
+            header.push((len as u8) | mask_bit);
         } else if len <= 0xFFFF {
-            header.push(126);
+            header.push(126 | mask_bit);
             header.extend_from_slice(&(len as u16).to_be_bytes());
         } else {
-            header.push(127);
+            header.push(127 | mask_bit);
             header.extend_from_slice(&(len as u64).to_be_bytes());
         }
 
-        writer.write_all(&header).await?;
-        writer.write_all(payload).await?;
+        if self.mask_payload {
+            // Generate 4-byte mask key
+            let mask_key: [u8; 4] = rand::random();
+            header.extend_from_slice(&mask_key);
+
+            // Mask the payload
+            let mut masked_payload = payload.to_vec();
+            for i in 0..masked_payload.len() {
+                masked_payload[i] ^= mask_key[i % 4];
+            }
+
+            writer.write_all(&header).await?;
+            writer.write_all(&masked_payload).await?;
+        } else {
+            writer.write_all(&header).await?;
+            writer.write_all(payload).await?;
+        }
+
+        writer.flush().await?;
         Ok(())
     }
 }
 
 impl Session {
     pub async fn send<T: serde::Serialize>(&self, msg: &T) -> crate::Result<()> {
-        let payload = serde_json::to_vec(msg)?;
-        self.send_frame(0x1, &payload).await
+        self.send_frame(0x1, &serde_json::to_vec(msg)?).await
     }
 
     pub async fn send_bin(&self, payload: &[u8]) -> crate::Result<()> {
@@ -73,19 +91,15 @@ impl Session {
     }
 
     pub async fn send_ping(&self) -> crate::Result<()> {
-        let mut writer = self.writer.lock().await;
-        // FIN + opcode = 0x89 (ping), payload length = 0
-        writer.write_all(&[0x89, 0x00]).await?;
-        writer.flush().await?;
-        Ok(())
+        self.send_frame(0x9, &[]).await
     }
 
     pub async fn send_pong(&self) -> crate::Result<()> {
-        let mut writer = self.writer.lock().await;
-        // FIN + opcode = 0x8A (pong), payload length = 0
-        writer.write_all(&[0x8A, 0x00]).await?;
-        writer.flush().await?;
-        Ok(())
+        self.send_frame(0xA, &[]).await
+    }
+
+    pub async fn close(&self) -> crate::Result<()> {
+        self.send_frame(0x8, &[]).await
     }
 
     pub fn start_ping(self: Arc<Self>) {
@@ -98,17 +112,6 @@ impl Session {
                 }
             }
         });
-    }
-
-    /// Send a close frame and flush
-    pub async fn close(&self) -> crate::Result<()> {
-        let mut writer = self.writer.lock().await;
-
-        // FIN=1, opcode=0x8 (close), payload length=0
-        let frame = [0x88, 0x00];
-        writer.write_all(&frame).await?;
-        writer.flush().await?;
-        Ok(())
     }
 }
 
