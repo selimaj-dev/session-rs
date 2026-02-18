@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use tokio::net::TcpListener;
 
-use session_rs::session::Session;
+use session_rs::session::WebSocket;
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> session_rs::Result<()> {
@@ -14,7 +14,7 @@ async fn main() -> session_rs::Result<()> {
 
         tokio::spawn(async move {
             // Wrap session in Arc so tasks can share it
-            let session = match Session::handshake(stream).await {
+            let session = match WebSocket::handshake(stream).await {
                 Ok(s) => Arc::new(s),
                 Err(e) => {
                     eprintln!("Handshake failed: {:?}", e);

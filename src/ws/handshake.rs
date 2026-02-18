@@ -6,7 +6,7 @@ use tokio::{
     sync::Mutex,
 };
 
-use crate::session::Session;
+use super::WebSocket;
 
 pub async fn handle_websocket_handshake(stream: &mut TcpStream) -> std::io::Result<()> {
     let (read_half, mut write_half) = stream.split();
@@ -81,9 +81,9 @@ pub async fn handle_websocket_handshake(stream: &mut TcpStream) -> std::io::Resu
     Ok(())
 }
 
-impl Session {
+impl WebSocket {
     pub async fn handshake(mut stream: TcpStream) -> crate::Result<Self> {
-        crate::handshake::handle_websocket_handshake(&mut stream).await?;
+        handle_websocket_handshake(&mut stream).await?;
 
         let (read, write) = stream.into_split();
 

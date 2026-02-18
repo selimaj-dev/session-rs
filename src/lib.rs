@@ -1,6 +1,6 @@
-pub mod handshake;
 pub mod server;
 pub mod session;
+pub mod ws;
 
 pub enum SessionFrame<T> {
     Typed(T),
