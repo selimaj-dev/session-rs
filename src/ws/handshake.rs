@@ -1,3 +1,4 @@
+use base64::Engine;
 use sha1::{Digest, Sha1};
 use std::sync::Arc;
 use tokio::{
@@ -102,7 +103,7 @@ impl WebSocket {
 
         // 2. Generate Sec-WebSocket-Key
         let key_bytes: [u8; 16] = rand::random();
-        let key = base64::encode(&key_bytes);
+        let key = base64::prelude::BASE64_STANDARD.encode(&key_bytes);
 
         // 3. Send HTTP Upgrade request
         let request = format!(
@@ -150,7 +151,7 @@ impl WebSocket {
             let mut sha1 = Sha1::new();
             sha1.update(key.as_bytes());
             sha1.update(b"258EAFA5-E914-47DA-95CA-C5AB0DC85B11");
-            base64::encode(sha1.finalize())
+            base64::prelude::BASE64_STANDARD.encode(sha1.finalize())
         };
         if sec_accept.as_deref() != Some(expected.as_str()) {
             return Err(super::Error::HandshakeFailed(
