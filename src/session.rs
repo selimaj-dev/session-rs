@@ -143,7 +143,7 @@ impl Session {
         }
 
         // --- 3. Read mask key ---
-        if !masked {
+        if !masked && !self.mask_payload {
             // Per spec, client-to-server frames MUST be masked
             self.close().await.ok();
             return Err(crate::Error::InvalidFrame(

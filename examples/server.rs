@@ -47,9 +47,6 @@ async fn main() -> session_rs::Result<()> {
                     }
                 }
             }
-
-            let _ = session.close().await;
-            println!("Connection {} closed", addr);
         });
     }
 }
