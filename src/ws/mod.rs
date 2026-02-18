@@ -24,7 +24,7 @@ pub struct WebSocket {
     pub(crate) reader: Arc<Mutex<tokio::net::tcp::OwnedReadHalf>>,
     pub(crate) writer: Arc<Mutex<tokio::net::tcp::OwnedWriteHalf>>,
     pub(crate) id: u64,
-    pub(crate) mask_payload: bool,
+    pub(crate) is_server: bool,
 }
 
 impl Clone for WebSocket {
@@ -32,7 +32,7 @@ impl Clone for WebSocket {
         WebSocket {
             reader: self.reader.clone(),
             writer: self.writer.clone(),
-            mask_payload: self.mask_payload.clone(),
+            is_server: self.is_server.clone(),
             id: self.id,
         }
     }
@@ -57,7 +57,7 @@ impl WebSocket {
         let mut writer = self.writer.lock().await;
 
         let mut header = Vec::with_capacity(10);
-        let mask_bit = if self.mask_payload { 0x80 } else { 0x00 };
+        let mask_bit = if self.is_server { 0x80 } else { 0x00 };
         header.push(0x80 | opcode); // FIN + opcode
 
         let len = payload.len();
@@ -71,7 +71,7 @@ impl WebSocket {
             header.extend_from_slice(&(len as u64).to_be_bytes());
         }
 
-        if self.mask_payload {
+        if self.is_server {
             // Generate 4-byte mask key
             let mask_key: [u8; 4] = rand::random();
             header.extend_from_slice(&mask_key);
@@ -155,26 +155,33 @@ impl WebSocket {
             payload_len = u64::from_be_bytes(buf);
         }
 
-        // --- 3. Read mask key ---
-        if !masked && !self.mask_payload {
-            // Per spec, client-to-server frames MUST be masked
-            self.close().await.ok();
-            return Err(Error::InvalidFrame(
-                "Received unmasked frame from client".into(),
-            ));
-        }
-
-        let mut mask = [0u8; 4];
-        reader.read_exact(&mut mask).await?;
-
-        // --- 4. Read payload ---
-        let mut payload = vec![0u8; payload_len as usize];
-        if payload_len > 0 {
-            reader.read_exact(&mut payload).await?;
-            for i in 0..payload.len() {
-                payload[i] ^= mask[i % 4];
+        let payload = if masked {
+            // --- 3. Read mask key ---
+            let mut mask = [0u8; 4];
+            reader.read_exact(&mut mask).await?;
+            let mut payload = vec![0u8; payload_len as usize];
+            if payload_len > 0 {
+                reader.read_exact(&mut payload).await?;
+                for i in 0..payload.len() {
+                    payload[i] ^= mask[i % 4];
+                }
             }
-        }
+            payload
+        } else {
+            // Per spec, client-to-server frames MUST be masked
+            if !self.is_server {
+                self.close().await.ok();
+                return Err(Error::InvalidFrame(
+                    "Received unmasked frame from client".into(),
+                ));
+            }
+
+            let mut payload = vec![0u8; payload_len as usize];
+            if payload_len > 0 {
+                reader.read_exact(&mut payload).await?;
+            }
+            payload
+        };
 
         // --- 6. Return opcode + payload ---
         Ok((fin, opcode, payload))

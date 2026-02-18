@@ -91,7 +91,7 @@ impl WebSocket {
             id: rand::random(),
             reader: Arc::new(Mutex::new(read)),
             writer: Arc::new(Mutex::new(write)),
-            mask_payload: false,
+            is_server: false,
         })
     }
 
@@ -165,7 +165,7 @@ impl WebSocket {
             id: rand::random(),
             reader: Arc::new(Mutex::new(read)),
             writer: Arc::new(Mutex::new(write)),
-            mask_payload: true,
+            is_server: true,
         })
     }
 }

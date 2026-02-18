@@ -10,14 +10,13 @@ async fn main() -> session_rs::Result<()> {
     let read_session = Arc::clone(&session);
     tokio::spawn(async move {
         loop {
-            println!("{:?}", read_session.read().await);
-            // match read_session.read().await {
-            //     Ok(Frame::Text(text)) => {
-            //         println!("Server says: {}", text);
-            //     }
-            //     Ok(_) => {}
-            //     Err(_) => break,
-            // }
+            match read_session.read().await {
+                Ok(Frame::Text(text)) => {
+                    println!("Server says: {}", text);
+                }
+                Ok(_) => {}
+                Err(_) => break,
+            }
         }
     });
 
