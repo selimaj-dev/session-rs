@@ -1,7 +1,5 @@
 use serde::{Deserialize, Serialize};
-use tokio::net::TcpListener;
-
-use session_rs::{Method, session::Session, ws::WebSocket};
+use session_rs::{Method, server::SessionServer};
 
 #[derive(Debug, Serialize, Deserialize)]
 struct Data;
@@ -15,23 +13,10 @@ impl Method for Data {
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> session_rs::Result<()> {
-    let listener = TcpListener::bind("127.0.0.1:8080").await?;
-    println!("Server listening on ws://127.0.0.1:8080");
+    let server = SessionServer::bind("127.0.0.1:8080").await?;
 
-    loop {
-        let (stream, addr) = listener.accept().await?;
-        println!("New connection: {}", addr);
-
-        tokio::spawn(async move {
-            // Wrap session in Arc so tasks can share it
-            let session = Session::from_ws(
-                WebSocket::handshake(stream)
-                    .await
-                    .expect("Failed to initialize websocket"),
-            );
-
-            session.start_receiver();
-
+    server
+        .session_loop(async |session, _| {
             session
                 .on::<Data, _>(async |_, req| {
                     println!("Msg from client: {req}");
@@ -43,6 +28,8 @@ async fn main() -> session_rs::Result<()> {
                     Ok("Hello from server".to_string())
                 })
                 .await;
-        });
-    }
+
+            Ok(())
+        })
+        .await
 }
