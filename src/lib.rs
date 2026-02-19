@@ -1,3 +1,5 @@
+use std::pin::Pin;
+
 use serde::{Deserialize, Serialize};
 
 pub mod server;
@@ -5,10 +7,12 @@ pub mod session;
 pub mod ws;
 
 pub type Result<T> = std::result::Result<T, Error>;
+pub type BoxFuture<'a> = Pin<Box<dyn Future<Output = ()> + Send + 'a>>;
+pub type MethodHandler = Box<dyn Fn(u32, serde_json::Value) -> BoxFuture<'static> + Send + Sync>;
 
 pub trait Method {
     const NAME: &'static str;
-    type Request: Serialize + for<'de> Deserialize<'de>;
+    type Request: Serialize + for<'de> Deserialize<'de> + Send + Sync;
     type Response: Serialize + for<'de> Deserialize<'de>;
 }
 

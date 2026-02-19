@@ -18,7 +18,9 @@ async fn main() -> session_rs::Result<()> {
 
     session.request::<Data>(()).await?;
 
-    session.on::<Data>(|i, d| println!("Ok {i} {d:?}")).await;
+    session
+        .on::<Data, _>(async |i, d| println!("Ok {i} {d:?}"))
+        .await;
 
     tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
 

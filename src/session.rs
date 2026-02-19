@@ -3,7 +3,7 @@ use std::{collections::HashMap, sync::Arc};
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 
-use crate::{GenericMethod, Method, ws::WebSocket};
+use crate::{GenericMethod, Method, MethodHandler, ws::WebSocket};
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase", tag = "type")]
@@ -27,7 +27,7 @@ pub enum Message<M: Method> {
 pub struct Session {
     pub ws: WebSocket,
     id: Arc<Mutex<u32>>,
-    methods: Arc<Mutex<HashMap<String, Box<dyn Fn(u32, serde_json::Value) + Send + Sync>>>>,
+    methods: Arc<Mutex<HashMap<String, MethodHandler>>>,
 }
 
 impl Session {
@@ -68,7 +68,7 @@ impl Session {
                         match msg {
                             Message::Request { id, method, data } => {
                                 if let Some(m) = s.methods.lock().await.get(&method) {
-                                    (m)(id, data)
+                                    (m)(id, data).await
                                 }
                             }
                             _ => {}
@@ -81,13 +81,22 @@ impl Session {
         });
     }
 
-    pub async fn on<M: Method>(&self, handler: impl Fn(u32, M::Request) + Send + Sync + 'static) {
+    pub async fn on<M: Method, Fut: Future<Output = ()> + Send + 'static>(
+        &self,
+        handler: impl Fn(u32, M::Request) -> Fut + Send + Sync + 'static,
+    ) {
+        let handler = Arc::new(handler);
+
         self.methods.lock().await.insert(
             M::NAME.to_string(),
             Box::new(move |id, value| {
-                if let Ok(req) = serde_json::from_value(value) {
-                    (handler)(id, req)
-                }
+                let handler = Arc::clone(&handler);
+
+                Box::pin(async move {
+                    if let Ok(req) = serde_json::from_value(value) {
+                        handler(id, req).await;
+                    }
+                })
             }),
         );
     }
