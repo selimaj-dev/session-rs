@@ -66,16 +66,12 @@ impl Method for Data {
 
 let server = SessionServer::bind("127.0.0.1:8080").await?;
 
-loop {
-    let session = server.accept().await;
+server
+    .session_loop(async |session, addr| {
+        // This will run on every new client
 
-    session
-        .on::<Data, _>(async |_, req| {
-            // Response is required
-            Ok("Hello from server".to_string())
-        })
-        .await;
-}
+        Ok(())
+    }).await;
 ```
 
 ## Protocol
