@@ -1,8 +1,16 @@
+use serde::{Deserialize, Serialize};
+
 pub mod server;
 pub mod session;
 pub mod ws;
 
 pub type Result<T> = std::result::Result<T, Error>;
+
+pub trait Method {
+    const NAME: &'static str;
+    type Request: Serialize + for<'de> Deserialize<'de>;
+    type Response: Serialize + for<'de> Deserialize<'de>;
+}
 
 #[derive(Debug)]
 pub enum Error {

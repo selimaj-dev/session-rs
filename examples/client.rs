@@ -1,32 +1,37 @@
 use serde::{Deserialize, Serialize};
-use session_rs::session::Session;
+use session_rs::{Method, session::Session, ws::Frame};
 
 #[derive(Debug, Serialize, Deserialize)]
 struct Data {}
 
-type Communication = Session<Data, Data, Data, Data, Data>;
+impl Method for Data {
+    const NAME: &'static str = "data";
+    type Request = ();
+    type Response = ();
+}
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> session_rs::Result<()> {
-    let session = Communication::connect("127.0.0.1:8080", "/").await?;
+    let session = Session::connect("127.0.0.1:8080", "/").await?;
 
-    // Spawn read loop
-    // tokio::spawn({
-    //     let session = session.clone();
-    //     async move {
-    //         loop {
-    //             match session.read().await {
-    //                 Ok(Frame::Text(text)) => {
-    //                     println!("Server says: {}", text);
-    //                 }
-    //                 Ok(_) => {}
-    //                 Err(_) => break,
-    //             }
-    //         }
-    //     }
-    // });
+    tokio::spawn({
+        let session = session.clone();
+        async move {
+            loop {
+                match session.ws.read().await {
+                    Ok(Frame::Text(text)) => {
+                        println!("Server says: {}", text);
+                    }
+                    Ok(_) => {}
+                    Err(_) => break,
+                }
+            }
+        }
+    });
 
-    session.request(&Data {}).await?;
+    session.request::<Data>(()).await?;
+
+    tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
 
     session.close().await?;
     Ok(())

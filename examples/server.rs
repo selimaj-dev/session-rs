@@ -31,7 +31,7 @@ async fn main() -> session_rs::Result<()> {
                         println!("Received text: {}", text);
 
                         // Echo back
-                        if let Err(e) = session.send(&serde_json::json!({"echo": text}).to_string()).await {
+                        if let Err(e) = session.send(&text).await {
                             eprintln!("Send error: {:?}", e);
                             break;
                         }

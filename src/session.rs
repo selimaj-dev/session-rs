@@ -1,82 +1,45 @@
-use std::{marker::PhantomData, sync::Arc};
+use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 
-use crate::ws::WebSocket;
+use crate::{Method, ws::WebSocket};
 
 #[derive(Debug, Serialize, Deserialize)]
-pub enum SessionMessageKind {
-    Request,
-    Response,
-    Notification,
+pub enum Message<M: Method> {
+    Request {
+        id: u32,
+        method: String,
+        data: M::Request,
+    },
+    Response {
+        id: u32,
+        error: bool,
+        result: M::Response,
+    },
+    Notification {
+        method: String,
+        data: M::Request,
+    },
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct SessionMessage<T: Serialize> {
-    id: u32,
-    kind: SessionMessageKind,
-    data: T,
-}
-
-pub struct Session<
-    Req: Serialize + for<'a> Deserialize<'a>,
-    Res: Serialize + for<'a> Deserialize<'a>,
-    PeerReq: Serialize + for<'a> Deserialize<'a>,
-    PeerRes: Serialize + for<'a> Deserialize<'a>,
-    Notification: Serialize + for<'a> Deserialize<'a>,
-> {
-    _pd: (
-        PhantomData<Req>,
-        PhantomData<Res>,
-        PhantomData<PeerReq>,
-        PhantomData<PeerRes>,
-        PhantomData<Notification>,
-    ),
+pub struct Session {
     pub ws: WebSocket,
     id: Arc<Mutex<u32>>,
 }
 
-impl<
-    Req: Serialize + for<'a> Deserialize<'a>,
-    Res: Serialize + for<'a> Deserialize<'a>,
-    PeerReq: Serialize + for<'a> Deserialize<'a>,
-    PeerRes: Serialize + for<'a> Deserialize<'a>,
-    Notification: Serialize + for<'a> Deserialize<'a>,
-> Session<Req, Res, PeerReq, PeerRes, Notification>
-{
+impl Session {
     pub fn clone(&self) -> Self {
         Self {
-            _pd: (
-                PhantomData,
-                PhantomData,
-                PhantomData,
-                PhantomData,
-                PhantomData,
-            ),
             ws: self.ws.clone(),
             id: self.id.clone(),
         }
     }
 }
 
-impl<
-    Req: Serialize + for<'a> Deserialize<'a>,
-    Res: Serialize + for<'a> Deserialize<'a>,
-    PeerReq: Serialize + for<'a> Deserialize<'a>,
-    PeerRes: Serialize + for<'a> Deserialize<'a>,
-    Notification: Serialize + for<'a> Deserialize<'a>,
-> Session<Req, Res, PeerReq, PeerRes, Notification>
-{
+impl Session {
     pub fn from_ws(ws: WebSocket) -> Self {
         Self {
-            _pd: (
-                PhantomData,
-                PhantomData,
-                PhantomData,
-                PhantomData,
-                PhantomData,
-            ),
             ws,
             id: Arc::new(Mutex::new(0)),
         }
@@ -87,55 +50,49 @@ impl<
     }
 }
 
-impl<
-    Req: Serialize + for<'a> Deserialize<'a>,
-    Res: Serialize + for<'a> Deserialize<'a>,
-    PeerReq: Serialize + for<'a> Deserialize<'a>,
-    PeerRes: Serialize + for<'a> Deserialize<'a>,
-    Notification: Serialize + for<'a> Deserialize<'a>,
-> Session<Req, Res, PeerReq, PeerRes, Notification>
-{
-    pub async fn send_id<T: Serialize>(
-        &self,
-        id: u32,
-        kind: SessionMessageKind,
-        data: &T,
-    ) -> crate::Result<()> {
+impl Session {
+    pub async fn send<M: Method>(&self, data: &Message<M>) -> crate::Result<()> {
         self.ws
-            .send_text_payload(&serde_json::to_vec(&SessionMessage { id, kind, data })?)
+            .send_text_payload(&serde_json::to_vec(&data)?)
             .await?;
-
         Ok(())
     }
 
-    pub async fn send<T: Serialize>(
-        &self,
-        kind: SessionMessageKind,
-        data: &T,
-    ) -> crate::Result<()> {
-        self.send_id(
-            {
-                let mut i = self.id.lock().await;
-                *i += 1;
-                *i
-            },
-            kind,
-            data,
-        )
+    pub async fn use_id(&self) -> u32 {
+        let mut id = self.id.lock().await;
+        *id += 1;
+        *id
+    }
+
+    pub async fn request<M: Method>(&self, req: M::Request) -> crate::Result<()> {
+        self.send::<M>(&Message::Request {
+            id: self.use_id().await,
+            method: M::NAME.to_string(),
+            data: req,
+        })
         .await
     }
 
-    pub async fn request(&self, data: &Req) -> crate::Result<()> {
-        self.send(SessionMessageKind::Request, data).await
+    pub async fn respond<M: Method>(
+        &self,
+        to: u32,
+        error: bool,
+        res: M::Response,
+    ) -> crate::Result<()> {
+        self.send::<M>(&Message::Response {
+            id: to,
+            error,
+            result: res,
+        })
+        .await
     }
 
-    pub async fn respond(&self, to_req: &SessionMessage<PeerReq>, data: &Res) -> crate::Result<()> {
-        self.send_id(to_req.id, SessionMessageKind::Response, data)
-            .await
-    }
-
-    pub async fn notify(&self, data: &Res) -> crate::Result<()> {
-        self.send(SessionMessageKind::Notification, data).await
+    pub async fn notify<M: Method>(&self, data: M::Request) -> crate::Result<()> {
+        self.send::<M>(&Message::Notification {
+            method: M::NAME.to_string(),
+            data,
+        })
+        .await
     }
 
     pub async fn close(&self) -> crate::Result<()> {
