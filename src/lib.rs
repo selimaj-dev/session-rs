@@ -12,6 +12,14 @@ pub trait Method {
     type Response: Serialize + for<'de> Deserialize<'de>;
 }
 
+pub struct GenericMethod;
+
+impl Method for GenericMethod {
+    const NAME: &'static str = "generic_do_not_use";
+    type Request = serde_json::Value;
+    type Response = serde_json::Value;
+}
+
 #[derive(Debug)]
 pub enum Error {
     WebSocket(ws::Error),

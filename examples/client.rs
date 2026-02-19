@@ -1,8 +1,8 @@
 use serde::{Deserialize, Serialize};
-use session_rs::{Method, session::Session, ws::Frame};
+use session_rs::{Method, session::Session};
 
 #[derive(Debug, Serialize, Deserialize)]
-struct Data {}
+struct Data;
 
 impl Method for Data {
     const NAME: &'static str = "data";
@@ -14,22 +14,11 @@ impl Method for Data {
 async fn main() -> session_rs::Result<()> {
     let session = Session::connect("127.0.0.1:8080", "/").await?;
 
-    tokio::spawn({
-        let session = session.clone();
-        async move {
-            loop {
-                match session.ws.read().await {
-                    Ok(Frame::Text(text)) => {
-                        println!("Server says: {}", text);
-                    }
-                    Ok(_) => {}
-                    Err(_) => break,
-                }
-            }
-        }
-    });
+    session.start_receiver();
 
     session.request::<Data>(()).await?;
+
+    session.on::<Data>(|i, d| println!("Ok {i} {d:?}")).await;
 
     tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
 

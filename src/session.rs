@@ -1,9 +1,9 @@
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 
-use crate::{Method, ws::WebSocket};
+use crate::{GenericMethod, Method, ws::WebSocket};
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase", tag = "type")]
@@ -27,6 +27,7 @@ pub enum Message<M: Method> {
 pub struct Session {
     pub ws: WebSocket,
     id: Arc<Mutex<u32>>,
+    methods: Arc<Mutex<HashMap<String, Box<dyn Fn(u32, serde_json::Value) + Send + Sync>>>>,
 }
 
 impl Session {
@@ -34,6 +35,7 @@ impl Session {
         Self {
             ws: self.ws.clone(),
             id: self.id.clone(),
+            methods: self.methods.clone(),
         }
     }
 }
@@ -43,11 +45,51 @@ impl Session {
         Self {
             ws,
             id: Arc::new(Mutex::new(0)),
+            methods: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
     pub async fn connect(addr: &str, path: &str) -> crate::Result<Self> {
         Ok(Self::from_ws(WebSocket::connect(addr, path).await?))
+    }
+}
+
+impl Session {
+    pub fn start_receiver(&self) {
+        let s = self.clone();
+        tokio::spawn(async move {
+            loop {
+                match s.ws.read().await {
+                    Ok(crate::ws::Frame::Text(text)) => {
+                        let Ok(msg) = serde_json::from_str::<Message<GenericMethod>>(&text) else {
+                            continue;
+                        };
+
+                        match msg {
+                            Message::Request { id, method, data } => {
+                                if let Some(m) = s.methods.lock().await.get(&method) {
+                                    (m)(id, data)
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                    Ok(_) => {}
+                    Err(_) => break,
+                }
+            }
+        });
+    }
+
+    pub async fn on<M: Method>(&self, handler: impl Fn(u32, M::Request) + Send + Sync + 'static) {
+        self.methods.lock().await.insert(
+            M::NAME.to_string(),
+            Box::new(move |id, value| {
+                if let Ok(req) = serde_json::from_value(value) {
+                    (handler)(id, req)
+                }
+            }),
+        );
     }
 }
 
