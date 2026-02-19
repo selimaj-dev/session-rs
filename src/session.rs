@@ -6,6 +6,7 @@ use tokio::sync::Mutex;
 use crate::{Method, ws::WebSocket};
 
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase", tag = "type")]
 pub enum Message<M: Method> {
     Request {
         id: u32,
