@@ -75,14 +75,15 @@ impl Session {
                         match msg {
                             Message::Request { id, method, data } => {
                                 if let Some(m) = s.methods.lock().await.get(&method) {
-                                    (m)(id, data).await;
-                                    // let s = s.clone();
-                                    // if let Ok(req) = serde_json::from_value(value) {
-                                    //     match handler(id, req).await {
-                                    //         Ok(res) => s.respond::<M>(id, res).await,
-                                    //         Err(res) => s.respond_error::<M>(id, res).await,
-                                    //     };
-                                    // }
+                                    if let Some((err, res)) = (m)(id, data).await {
+                                        if err {
+                                            s.respond_error(id, res)
+                                                .await
+                                                .expect("Failed to respond");
+                                        } else {
+                                            s.respond(id, res).await.expect("Failed to respond");
+                                        }
+                                    }
                                 }
                             }
                             Message::Response { id, result } => {
@@ -170,16 +171,16 @@ impl Session {
         }
     }
 
-    pub async fn respond<M: Method>(&self, to: u32, res: M::Response) -> crate::Result<()> {
-        self.send::<M>(&Message::Response {
+    pub async fn respond(&self, to: u32, val: serde_json::Value) -> crate::Result<()> {
+        self.send::<GenericMethod>(&Message::Response {
             id: to,
-            result: res,
+            result: val,
         })
         .await
     }
 
-    pub async fn respond_error<M: Method>(&self, to: u32, err: M::Error) -> crate::Result<()> {
-        self.send::<M>(&Message::ErrorResponse { id: to, error: err })
+    pub async fn respond_error(&self, to: u32, val: serde_json::Value) -> crate::Result<()> {
+        self.send::<GenericMethod>(&Message::ErrorResponse { id: to, error: val })
             .await
     }
 
