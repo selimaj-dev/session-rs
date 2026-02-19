@@ -8,9 +8,9 @@ struct Data;
 
 impl Method for Data {
     const NAME: &'static str = "data";
-    type Request = ();
-    type Response = ();
-    type Error = ();
+    type Request = String;
+    type Response = String;
+    type Error = String;
 }
 
 #[tokio::main(flavor = "current_thread")]
@@ -32,7 +32,17 @@ async fn main() -> session_rs::Result<()> {
 
             session.start_receiver();
 
-            session.on::<Data, _>(async |_, _| Ok(())).await;
+            session
+                .on::<Data, _>(async |_, req| {
+                    println!("Msg from client: {req}");
+
+                    if req == "invalid_data" {
+                        return Err("Invalid data".to_string());
+                    }
+
+                    Ok("Hello from server".to_string())
+                })
+                .await;
         });
     }
 }
