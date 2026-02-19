@@ -45,6 +45,56 @@ impl<
     Notification: Serialize + for<'a> Deserialize<'a>,
 > Session<Req, Res, PeerReq, PeerRes, Notification>
 {
+    pub fn clone(&self) -> Self {
+        Self {
+            _pd: (
+                PhantomData,
+                PhantomData,
+                PhantomData,
+                PhantomData,
+                PhantomData,
+            ),
+            ws: self.ws.clone(),
+            id: self.id.clone(),
+        }
+    }
+}
+
+impl<
+    Req: Serialize + for<'a> Deserialize<'a>,
+    Res: Serialize + for<'a> Deserialize<'a>,
+    PeerReq: Serialize + for<'a> Deserialize<'a>,
+    PeerRes: Serialize + for<'a> Deserialize<'a>,
+    Notification: Serialize + for<'a> Deserialize<'a>,
+> Session<Req, Res, PeerReq, PeerRes, Notification>
+{
+    pub fn from_ws(ws: WebSocket) -> Self {
+        Self {
+            _pd: (
+                PhantomData,
+                PhantomData,
+                PhantomData,
+                PhantomData,
+                PhantomData,
+            ),
+            ws,
+            id: Arc::new(Mutex::new(0)),
+        }
+    }
+
+    pub async fn connect(addr: &str, path: &str) -> crate::Result<Self> {
+        Ok(Self::from_ws(WebSocket::connect(addr, path).await?))
+    }
+}
+
+impl<
+    Req: Serialize + for<'a> Deserialize<'a>,
+    Res: Serialize + for<'a> Deserialize<'a>,
+    PeerReq: Serialize + for<'a> Deserialize<'a>,
+    PeerRes: Serialize + for<'a> Deserialize<'a>,
+    Notification: Serialize + for<'a> Deserialize<'a>,
+> Session<Req, Res, PeerReq, PeerRes, Notification>
+{
     pub async fn send_id<T: Serialize>(
         &self,
         id: u32,
@@ -86,5 +136,9 @@ impl<
 
     pub async fn notify(&self, data: &Res) -> crate::Result<()> {
         self.send(SessionMessageKind::Notification, data).await
+    }
+
+    pub async fn close(&self) -> crate::Result<()> {
+        Ok(self.ws.close().await?)
     }
 }
