@@ -99,6 +99,10 @@ impl WebSocket {
         self.send_frame(0x1, msg.as_bytes()).await
     }
 
+    pub async fn send_text_payload(&self, payload: &[u8]) -> Result<()> {
+        self.send_frame(0x1, payload).await
+    }
+
     pub async fn send_bin(&self, payload: &[u8]) -> Result<()> {
         self.send_frame(0x2, payload).await
     }
