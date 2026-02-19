@@ -77,3 +77,29 @@ loop {
         .await;
 }
 ```
+
+## Protocol
+
+#### Request
+
+The request `id` is separated from the peer, and will increment only on it's requests.
+
+```json
+{ "type": "request", "id": 1, "method": "data", "data": "Hello from client" }
+```
+
+#### Response
+
+The response `id` **must** remain the same as the request.
+
+```json
+{ "type": "response", "id": 1, "result": "Hello from server" }
+```
+
+#### Notifications
+
+A notification is a method that doesn't need validation or output, it simply notifies a peer for a specific information
+
+```json
+{ "type": "notification", "result": "Hello from server" }
+```
