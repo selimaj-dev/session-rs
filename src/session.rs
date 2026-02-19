@@ -2,6 +2,7 @@ use std::{collections::HashMap, sync::Arc};
 
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
+use tokio::sync::broadcast;
 
 use crate::{GenericMethod, Method, MethodHandler, ws::WebSocket};
 
@@ -15,8 +16,11 @@ pub enum Message<M: Method> {
     },
     Response {
         id: u32,
-        error: bool,
         result: M::Response,
+    },
+    ErrorResponse {
+        id: u32,
+        error: M::Error,
     },
     Notification {
         method: String,
@@ -28,6 +32,7 @@ pub struct Session {
     pub ws: WebSocket,
     id: Arc<Mutex<u32>>,
     methods: Arc<Mutex<HashMap<String, MethodHandler>>>,
+    tx: broadcast::Sender<(u32, bool, serde_json::Value)>,
 }
 
 impl Session {
@@ -36,6 +41,7 @@ impl Session {
             ws: self.ws.clone(),
             id: self.id.clone(),
             methods: self.methods.clone(),
+            tx: self.tx.clone(),
         }
     }
 }
@@ -46,6 +52,7 @@ impl Session {
             ws,
             id: Arc::new(Mutex::new(0)),
             methods: Arc::new(Mutex::new(HashMap::new())),
+            tx: broadcast::channel(8192).0,
         }
     }
 
@@ -70,6 +77,12 @@ impl Session {
                                 if let Some(m) = s.methods.lock().await.get(&method) {
                                     (m)(id, data).await
                                 }
+                            }
+                            Message::Response { id, result } => {
+                                s.tx.send((id, false, result)).unwrap();
+                            }
+                            Message::ErrorResponse { id, error } => {
+                                s.tx.send((id, true, error)).unwrap();
                             }
                             _ => {}
                         }
@@ -116,27 +129,45 @@ impl Session {
         *id
     }
 
-    pub async fn request<M: Method>(&self, req: M::Request) -> crate::Result<()> {
+    pub async fn request<M: Method>(
+        &self,
+        req: M::Request,
+    ) -> crate::Result<std::result::Result<M::Response, M::Error>> {
+        let id = self.use_id().await;
+
         self.send::<M>(&Message::Request {
-            id: self.use_id().await,
+            id,
             method: M::NAME.to_string(),
             data: req,
+        })
+        .await?;
+
+        let mut rx = self.tx.subscribe();
+
+        loop {
+            let r = rx.recv().await?;
+
+            if r.0 == id {
+                break Ok(if r.1 {
+                    Err(serde_json::from_value(r.2)?)
+                } else {
+                    Ok(serde_json::from_value(r.2)?)
+                });
+            }
+        }
+    }
+
+    pub async fn respond<M: Method>(&self, to: u32, res: M::Response) -> crate::Result<()> {
+        self.send::<M>(&Message::Response {
+            id: to,
+            result: res,
         })
         .await
     }
 
-    pub async fn respond<M: Method>(
-        &self,
-        to: u32,
-        error: bool,
-        res: M::Response,
-    ) -> crate::Result<()> {
-        self.send::<M>(&Message::Response {
-            id: to,
-            error,
-            result: res,
-        })
-        .await
+    pub async fn respond_error<M: Method>(&self, to: u32, err: M::Error) -> crate::Result<()> {
+        self.send::<M>(&Message::ErrorResponse { id: to, error: err })
+            .await
     }
 
     pub async fn notify<M: Method>(&self, data: M::Request) -> crate::Result<()> {

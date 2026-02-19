@@ -8,6 +8,7 @@ impl Method for Data {
     const NAME: &'static str = "data";
     type Request = ();
     type Response = ();
+    type Error = ();
 }
 
 #[tokio::main(flavor = "current_thread")]
@@ -16,7 +17,7 @@ async fn main() -> session_rs::Result<()> {
 
     session.start_receiver();
 
-    session.request::<Data>(()).await?;
+    println!("{:?}", session.request::<Data>(()).await?);
 
     session
         .on::<Data, _>(async |i, d| println!("Ok {i} {d:?}"))
