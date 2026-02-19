@@ -1,7 +1,17 @@
-use std::sync::Arc;
+use serde::{Deserialize, Serialize};
 use tokio::net::TcpListener;
 
-use session_rs::ws::{Frame, WebSocket};
+use session_rs::{Method, session::Session, ws::WebSocket};
+
+#[derive(Debug, Serialize, Deserialize)]
+struct Data;
+
+impl Method for Data {
+    const NAME: &'static str = "data";
+    type Request = ();
+    type Response = ();
+    type Error = ();
+}
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> session_rs::Result<()> {
@@ -14,35 +24,15 @@ async fn main() -> session_rs::Result<()> {
 
         tokio::spawn(async move {
             // Wrap session in Arc so tasks can share it
-            let session = match WebSocket::handshake(stream).await {
-                Ok(s) => Arc::new(s),
-                Err(e) => {
-                    eprintln!("Handshake failed: {:?}", e);
-                    return;
-                }
-            };
+            let session = Session::from_ws(
+                WebSocket::handshake(stream)
+                    .await
+                    .expect("Failed to initialize websocket"),
+            );
 
-            session.start_ping_loop();
+            session.start_receiver();
 
-            // Read loop
-            loop {
-                match session.read().await {
-                    Ok(Frame::Text(text)) => {
-                        println!("Received text: {}", text);
-
-                        // Echo back
-                        if let Err(e) = session.send(&text).await {
-                            eprintln!("Send error: {:?}", e);
-                            break;
-                        }
-                    }
-                    Ok(_) => {}
-                    Err(e) => {
-                        eprintln!("{e:?}");
-                        break;
-                    }
-                }
-            }
+            session.on::<Data, _>(async |_, _| Ok(())).await;
         });
     }
 }

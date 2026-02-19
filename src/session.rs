@@ -75,7 +75,14 @@ impl Session {
                         match msg {
                             Message::Request { id, method, data } => {
                                 if let Some(m) = s.methods.lock().await.get(&method) {
-                                    (m)(id, data).await
+                                    (m)(id, data).await;
+                                    // let s = s.clone();
+                                    // if let Ok(req) = serde_json::from_value(value) {
+                                    //     match handler(id, req).await {
+                                    //         Ok(res) => s.respond::<M>(id, res).await,
+                                    //         Err(res) => s.respond_error::<M>(id, res).await,
+                                    //     };
+                                    // }
                                 }
                             }
                             Message::Response { id, result } => {
@@ -94,7 +101,10 @@ impl Session {
         });
     }
 
-    pub async fn on<M: Method, Fut: Future<Output = ()> + Send + 'static>(
+    pub async fn on<
+        M: Method,
+        Fut: Future<Output = Result<M::Response, M::Error>> + Send + 'static,
+    >(
         &self,
         handler: impl Fn(u32, M::Request) -> Fut + Send + Sync + 'static,
     ) {
@@ -106,9 +116,12 @@ impl Session {
                 let handler = Arc::clone(&handler);
 
                 Box::pin(async move {
-                    if let Ok(req) = serde_json::from_value(value) {
-                        handler(id, req).await;
-                    }
+                    Some(
+                        match handler(id, serde_json::from_value(value).ok()?).await {
+                            Ok(v) => (false, serde_json::to_value(v).ok()?),
+                            Err(v) => (true, serde_json::to_value(v).ok()?),
+                        },
+                    )
                 })
             }),
         );
