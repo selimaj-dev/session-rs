@@ -3,7 +3,9 @@ use std::{collections::HashMap, sync::Arc};
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 use tokio::sync::broadcast;
+use tokio::time::timeout;
 
+use crate::BoxFuture;
 use crate::{GenericMethod, Method, MethodHandler, ws::WebSocket};
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -32,7 +34,10 @@ pub struct Session {
     pub ws: WebSocket,
     id: Arc<Mutex<u32>>,
     methods: Arc<Mutex<HashMap<String, MethodHandler>>>,
+    on_close_fn:
+        Arc<Mutex<Option<Box<dyn Fn() -> BoxFuture<'static, Result<(), String>> + Send + Sync>>>>,
     tx: broadcast::Sender<(u32, bool, serde_json::Value)>,
+    pong_tx: broadcast::Sender<()>,
 }
 
 impl Session {
@@ -41,18 +46,25 @@ impl Session {
             ws: self.ws.clone(),
             id: self.id.clone(),
             methods: self.methods.clone(),
+            on_close_fn: self.on_close_fn.clone(),
             tx: self.tx.clone(),
+            pong_tx: self.pong_tx.clone(),
         }
     }
 }
 
 impl Session {
     pub fn from_ws(ws: WebSocket) -> Self {
+        let (tx, _) = broadcast::channel(8192);
+        let (pong_tx, _) = broadcast::channel(16);
+
         Self {
             ws,
             id: Arc::new(Mutex::new(0)),
             methods: Arc::new(Mutex::new(HashMap::new())),
-            tx: broadcast::channel(8192).0,
+            on_close_fn: Arc::new(Mutex::new(None)),
+            tx,
+            pong_tx,
         }
     }
 
@@ -95,14 +107,45 @@ impl Session {
                             _ => {}
                         }
                     }
+                    Ok(crate::ws::Frame::Pong) => {
+                        let _ = s.pong_tx.send(());
+                    }
                     Ok(_) => {}
-                    Err(_) => break,
+                    Err(_) => {
+                        s.trigger_close().await;
+                        break;
+                    }
+                }
+            }
+        });
+    }
+    pub fn start_ping(&self, interval: tokio::time::Duration, timeout_dur: tokio::time::Duration) {
+        let s = self.clone();
+
+        tokio::spawn(async move {
+            let mut pong_rx = s.pong_tx.subscribe();
+
+            loop {
+                tokio::time::sleep(interval).await;
+
+                if s.ws.send_ping().await.is_err() {
+                    s.trigger_close().await;
+                    break;
+                }
+
+                let result = timeout(timeout_dur, pong_rx.recv()).await;
+
+                if result.is_err() {
+                    // timeout expired
+                    let _ = s.close().await;
+                    s.trigger_close().await;
+                    break;
                 }
             }
         });
     }
 
-    pub async fn on<
+    pub async fn on_request<
         M: Method,
         Fut: Future<Output = Result<M::Response, M::Error>> + Send + 'static,
     >(
@@ -126,6 +169,18 @@ impl Session {
                 })
             }),
         );
+    }
+
+    pub async fn on_close<Fut>(&self, handler: impl Fn() -> Fut + Send + Sync + 'static)
+    where
+        Fut: Future<Output = Result<(), String>> + Send + 'static,
+    {
+        let handler = Arc::new(handler);
+
+        *self.on_close_fn.lock().await = Some(Box::new(move || {
+            let handler = handler.clone();
+            Box::pin(async move { handler().await })
+        }));
     }
 }
 
@@ -192,7 +247,15 @@ impl Session {
         .await
     }
 
+    async fn trigger_close(&self) {
+        if let Some(handler) = self.on_close_fn.lock().await.as_ref() {
+            let _ = handler().await;
+        }
+    }
+
     pub async fn close(&self) -> crate::Result<()> {
-        Ok(self.ws.close().await?)
+        let res = self.ws.close().await;
+        self.trigger_close().await;
+        Ok(res?)
     }
 }

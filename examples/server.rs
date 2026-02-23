@@ -18,7 +18,7 @@ async fn main() -> session_rs::Result<()> {
     server
         .session_loop(async |session, _| {
             session
-                .on::<Data, _>(async |_, req| {
+                .on_request::<Data, _>(async |_, req| {
                     println!("Msg from client: {req}");
 
                     if req == "invalid_data" {

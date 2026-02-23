@@ -7,7 +7,8 @@ pub mod session;
 pub mod ws;
 
 pub type Result<T> = std::result::Result<T, Error>;
-pub type BoxFuture<'a> = Pin<Box<dyn Future<Output = Option<(bool, serde_json::Value)>> + Send + 'a>>;
+pub type BoxFuture<'a, T = Option<(bool, serde_json::Value)>> =
+    Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 pub type MethodHandler = Box<dyn Fn(u32, serde_json::Value) -> BoxFuture<'static> + Send + Sync>;
 
 pub trait Method {
