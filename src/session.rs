@@ -1,3 +1,4 @@
+use std::hash::Hash;
 use std::{collections::HashMap, sync::Arc};
 
 use serde::{Deserialize, Serialize};
@@ -259,3 +260,17 @@ impl Session {
         Ok(res?)
     }
 }
+
+impl Hash for Session {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.ws.id.hash(state);
+    }
+}
+
+impl PartialEq for Session {
+    fn eq(&self, other: &Self) -> bool {
+        self.ws.id == other.ws.id
+    }
+}
+
+impl Eq for Session {}
