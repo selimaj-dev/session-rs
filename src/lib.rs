@@ -1,4 +1,4 @@
-use std::pin::Pin;
+use std::{pin::Pin, sync::Arc};
 
 use serde::{Deserialize, Serialize};
 
@@ -9,7 +9,7 @@ pub mod ws;
 pub type Result<T> = std::result::Result<T, Error>;
 pub type BoxFuture<'a, T = Option<(bool, serde_json::Value)>> =
     Pin<Box<dyn Future<Output = T> + Send + 'a>>;
-pub type MethodHandler = Box<dyn Fn(u32, serde_json::Value) -> BoxFuture<'static> + Send + Sync>;
+pub type MethodHandler = Arc<dyn Fn(u32, serde_json::Value) -> BoxFuture<'static> + Send + Sync>;
 
 pub trait Method {
     const NAME: &'static str;
