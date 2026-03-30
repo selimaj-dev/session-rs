@@ -87,7 +87,12 @@ impl Session {
 
                         match msg {
                             Message::Request { id, method, data } => {
-                                if let Some(m) = s.methods.lock().await.get(&method) {
+                                let handler = {
+                                    let methods = s.methods.lock().await;
+                                    methods.get(&method).cloned()
+                                };
+
+                                if let Some(m) = handler {
                                     if let Some((err, res)) = (m)(id, data).await {
                                         if err {
                                             s.respond_error(id, res)
@@ -157,7 +162,7 @@ impl Session {
 
         self.methods.lock().await.insert(
             M::NAME.to_string(),
-            Box::new(move |id, value| {
+            Arc::new(move |id, value| {
                 let handler = Arc::clone(&handler);
 
                 Box::pin(async move {

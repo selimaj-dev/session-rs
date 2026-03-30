@@ -1,6 +1,6 @@
 use std::{net::SocketAddr, sync::Arc};
 
-use tokio::net::TcpListener;
+use tokio::{net::TcpListener, time::timeout};
 
 use crate::{session::Session, ws::WebSocket};
 
@@ -23,19 +23,40 @@ impl SessionServer {
         Ok((Session::from_ws(ws), addr))
     }
 
-    pub async fn session_loop<Fut: Future<Output = crate::Result<()>> + Send + 'static>(
-        &self,
-        on_conn: impl Fn(Session, SocketAddr) -> Fut + 'static,
-    ) -> crate::Result<()> {
+    pub async fn session_loop<F, Fut>(&self, on_conn: F) -> crate::Result<()>
+    where
+        F: Fn(Session, SocketAddr) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = crate::Result<()>> + Send + 'static,
+    {
         let conn_handler = Arc::new(on_conn);
 
         loop {
-            let (session, addr) = self.accept().await?;
+            let (stream, addr) = self.listener.accept().await?;
             let conn_handler = conn_handler.clone();
 
-            session.start_receiver();
+            tokio::spawn(async move {
+                match timeout(
+                    tokio::time::Duration::from_secs(5),
+                    WebSocket::handshake(stream),
+                )
+                .await
+                {
+                    Ok(Ok(ws)) => {
+                        let session = Session::from_ws(ws);
+                        session.start_receiver();
 
-            tokio::spawn(conn_handler(session, addr));
+                        if let Err(e) = conn_handler(session, addr).await {
+                            eprintln!("Connection error: {:?}", e);
+                        }
+                    }
+                    Ok(Err(e)) => {
+                        eprintln!("Handshake failed from {}: {:?}", addr, e);
+                    }
+                    Err(_) => {
+                        eprintln!("Handshake failed from {}: Handshake Timeout", addr);
+                    }
+                }
+            });
         }
     }
 }

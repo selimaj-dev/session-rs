@@ -1,10 +1,12 @@
 use base64::Engine;
+use base64::engine::general_purpose::STANDARD as Base64;
 use sha1::{Digest, Sha1};
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
     net::TcpStream,
     sync::Mutex,
+    time::{Duration, timeout},
 };
 
 use super::WebSocket;
@@ -13,72 +15,119 @@ pub async fn handle_websocket_handshake(stream: &mut TcpStream) -> std::io::Resu
     let (read_half, mut write_half) = stream.split();
     let mut reader = BufReader::new(read_half);
 
+    // ---- 1. Read request line with timeout ----
     let mut request_line = String::new();
-    reader.read_line(&mut request_line).await?;
+    timeout(Duration::from_secs(5), reader.read_line(&mut request_line)).await??;
+
     let request_line = request_line.trim_end();
 
-    if request_line.starts_with("HEAD") {
+    if !request_line.starts_with("GET") {
         write_half
-            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n")
+            .write_all(
+                b"HTTP/1.1 405 Method Not Allowed\r\n\
+                Content-Length: 0\r\n\
+                Connection: close\r\n\r\n",
+            )
             .await?;
+        write_half.shutdown().await?;
         return Ok(());
     }
 
-    if !request_line.starts_with("GET") {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            "Invalid HTTP method",
-        ));
-    }
-
-    use std::collections::HashMap;
+    // ---- 2. Read headers with timeout ----
     let mut headers = HashMap::new();
-    let mut line = String::new();
 
     loop {
-        line.clear();
-        reader.read_line(&mut line).await?;
+        let mut line = String::new();
+        timeout(Duration::from_secs(5), reader.read_line(&mut line)).await??;
+
         if line == "\r\n" {
             break;
         }
+
         if let Some((k, v)) = line.split_once(':') {
             headers.insert(k.trim().to_lowercase(), v.trim().to_string());
         }
     }
 
-    if headers
+    // ---- 3. Check if this is a WebSocket upgrade ----
+    let is_upgrade = headers
         .get("upgrade")
-        .map(|v| !v.eq_ignore_ascii_case("websocket"))
-        .unwrap_or(true)
-    {
+        .map(|v| v.eq_ignore_ascii_case("websocket"))
+        .unwrap_or(false);
+
+    let has_connection_upgrade = headers
+        .get("connection")
+        .map(|v| v.to_lowercase().contains("upgrade"))
+        .unwrap_or(false);
+
+    if !is_upgrade || !has_connection_upgrade {
+        // Normal HTTP response (important for browsers)
+        let body = b"OK";
+
         write_half
-            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nOK")
+            .write_all(
+                format!(
+                    "HTTP/1.1 200 OK\r\n\
+                     Content-Type: text/plain\r\n\
+                     Content-Length: {}\r\n\
+                     Connection: close\r\n\
+                     \r\n",
+                    body.len()
+                )
+                .as_bytes(),
+            )
             .await?;
+
+        write_half.write_all(body).await?;
+        write_half.flush().await?;
+        write_half.shutdown().await?;
+
         return Ok(());
     }
 
-    let key = headers
-        .get("sec-websocket-key")
-        .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidData, "Missing key"))?;
+    // ---- 4. Validate required headers ----
+    let key = headers.get("sec-websocket-key").ok_or_else(|| {
+        std::io::Error::new(std::io::ErrorKind::InvalidData, "Missing Sec-WebSocket-Key")
+    })?;
 
-    use base64::Engine;
-    use base64::engine::general_purpose::STANDARD as Base64;
-    use sha1::{Digest, Sha1};
+    let version_ok = headers
+        .get("sec-websocket-version")
+        .map(|v| v == "13")
+        .unwrap_or(false);
 
+    if !version_ok {
+        write_half
+            .write_all(
+                b"HTTP/1.1 426 Upgrade Required\r\n\
+                Sec-WebSocket-Version: 13\r\n\
+                Content-Length: 0\r\n\
+                Connection: close\r\n\r\n",
+            )
+            .await?;
+        write_half.shutdown().await?;
+        return Ok(());
+    }
+
+    // ---- 5. Generate Sec-WebSocket-Accept ----
     let mut hasher = Sha1::new();
     hasher.update(key.as_bytes());
     hasher.update(b"258EAFA5-E914-47DA-95CA-C5AB0DC85B11");
+
     let accept = Base64.encode(hasher.finalize());
 
+    // ---- 6. Send upgrade response ----
     let response = format!(
         "HTTP/1.1 101 Switching Protocols\r\n\
          Upgrade: websocket\r\n\
          Connection: Upgrade\r\n\
-         Sec-WebSocket-Accept: {}\r\n\r\n",
+         Sec-WebSocket-Accept: {}\r\n\
+         \r\n",
         accept
     );
 
     write_half.write_all(response.as_bytes()).await?;
+    write_half.flush().await?;
+
     Ok(())
 }
 
@@ -122,7 +171,11 @@ impl WebSocket {
         // 4. Read HTTP response
         let mut reader = BufReader::new(&mut stream);
         let mut status_line = String::new();
-        reader.read_line(&mut status_line).await?;
+        timeout(
+            tokio::time::Duration::from_secs(5),
+            reader.read_line(&mut status_line),
+        )
+        .await??;
         if !status_line.starts_with("HTTP/1.1 101") {
             return Err(super::Error::HandshakeFailed(format!(
                 "Expected 101 Switching Protocols, got: {}",

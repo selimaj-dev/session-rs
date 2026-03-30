@@ -9,6 +9,7 @@ pub enum Error {
     HandshakeFailed(String),
     Utf8(FromUtf8Error),
     ConnectionClosed,
+    Elapsed,
 }
 
 impl From<std::io::Error> for Error {
@@ -20,5 +21,11 @@ impl From<std::io::Error> for Error {
 impl From<FromUtf8Error> for Error {
     fn from(value: FromUtf8Error) -> Self {
         Self::Utf8(value)
+    }
+}
+
+impl From<tokio::time::error::Elapsed> for Error {
+    fn from(_: tokio::time::error::Elapsed) -> Self {
+        Self::Elapsed
     }
 }
